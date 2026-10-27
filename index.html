@@ -59,12 +59,21 @@
   .hint b { color: var(--yes); } .hint i { color: var(--maybe); font-style: normal; font-weight: 600; }
   .days { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .day {
-    position: relative; text-align: left; cursor: pointer; user-select: none;
-    padding: 14px; border-radius: 16px; font: inherit; color: var(--text);
+    position: relative; border-radius: 16px;
     background: var(--card); border: 1.5px solid var(--line);
-    transition: transform .1s, border-color .15s, background .15s;
+    transition: border-color .15s, background .15s;
   }
-  .day:active { transform: scale(.97); }
+  .day .tap {
+    display: block; width: 100%; text-align: left; cursor: pointer; user-select: none;
+    padding: 14px; font: inherit; color: var(--text); background: none; border: 0;
+    transition: transform .1s;
+  }
+  .day .tap:active { transform: scale(.97); }
+  .day select {
+    display: block; width: calc(100% - 20px); margin: -4px 10px 10px; padding: 8px 10px;
+    font: 600 14px Inter, sans-serif; color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  }
   .day .dow { font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
   .day .date { font-family: "Bricolage Grotesque", sans-serif; font-weight: 800; font-size: 22px; }
   .day .tag { font-size: 12px; color: var(--pink); font-weight: 600; min-height: 16px; }
@@ -92,6 +101,8 @@
   .bar .y { background: var(--yes); } .bar .m { background: var(--maybe); opacity: .8; }
   .names { font-size: 13px; color: var(--muted); }
   .names .ny { color: var(--text); }
+  .names .t { color: var(--gold); font-weight: 600; }
+  .allby { font-size: 13px; color: var(--yes); margin-top: 6px; }
   .empty { color: var(--muted); font-size: 14px; }
   .who { font-size: 13px; color: var(--muted); margin-top: 14px; }
   .demo { margin-top: 32px; padding: 10px 14px; border-radius: 12px; font-size: 13px;
@@ -108,7 +119,7 @@
   <label class="fl" for="name">Your name</label>
   <input id="name" type="text" maxlength="30" placeholder="e.g. Sam" autocomplete="given-name">
 
-  <p class="hint">Tap once = <b>✓ can come</b> · twice = <i>? maybe</i> · three times = clear</p>
+  <p class="hint">Tap once = <b>✓ can come</b> · twice = <i>? maybe</i> · three times = clear. Then pick from what time.</p>
   <div class="days" id="days"></div>
 
   <button class="btn" id="save">Send my days 🎉</button>
@@ -145,7 +156,9 @@ const DAYS = Array.from({ length: NUM_DAYS }, (_, i) => {
 const $ = (id) => document.getElementById(id);
 const CYCLE = { undefined: "yes", yes: "maybe", maybe: undefined };
 const MARK = { yes: "✓", maybe: "?" };
+const HOURS = Array.from({ length: 12 }, (_, i) => `${String(i + 12).padStart(2, "0")}:00`); // 12:00–23:00
 let picks = {};
+let times = {};
 let votes = {};
 
 const store = {
@@ -179,18 +192,29 @@ const api = DB_URL ? {
 function renderDays() {
   $("days").innerHTML = "";
   for (const d of DAYS) {
+    const card = document.createElement("div");
+    card.className = "day";
+    if (picks[d.id]) card.dataset.s = picks[d.id];
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "day";
-    if (picks[d.id]) b.dataset.s = picks[d.id];
+    b.className = "tap";
     b.innerHTML = `<div class="dow">${d.dow}</div><div class="date">${d.date}</div>
       <div class="tag">${d.tag}</div><div class="state">${MARK[picks[d.id]] || ""}</div>`;
     b.onclick = () => {
       const next = CYCLE[picks[d.id]];
-      if (next) picks[d.id] = next; else delete picks[d.id];
+      if (next) picks[d.id] = next; else { delete picks[d.id]; delete times[d.id]; }
       renderDays();
     };
-    $("days").appendChild(b);
+    card.appendChild(b);
+    if (picks[d.id]) {
+      const sel = document.createElement("select");
+      sel.setAttribute("aria-label", `From what time on ${d.date}`);
+      sel.innerHTML = `<option value="">from any time</option>` +
+        HOURS.map((h) => `<option value="${h}"${times[d.id] === h ? " selected" : ""}>from ${h}</option>`).join("");
+      sel.onchange = () => { if (sel.value) times[d.id] = sel.value; else delete times[d.id]; };
+      card.appendChild(sel);
+    }
+    $("days").appendChild(card);
   }
 }
 
@@ -203,21 +227,30 @@ function renderResults() {
     $("who").textContent = "";
     return;
   }
+  const label = (p, id) => esc(p.name) + (p.times?.[id] ? ` <span class="t">${p.times[id]}+</span>` : "");
   const rows = DAYS.map((d) => {
-    const yes = people.filter((p) => p.picks?.[d.id] === "yes").map((p) => p.name);
-    const maybe = people.filter((p) => p.picks?.[d.id] === "maybe").map((p) => p.name);
-    return { d, yes, maybe, score: yes.length + maybe.length * 0.5 };
+    const yesP = people.filter((p) => p.picks?.[d.id] === "yes");
+    const maybeP = people.filter((p) => p.picks?.[d.id] === "maybe");
+    // The latest "from" time among the yes votes is when everyone who said yes is there.
+    const allBy = yesP.map((p) => p.times?.[d.id]).filter(Boolean).sort().pop();
+    return {
+      d, allBy,
+      yes: yesP.map((p) => label(p, d.id)),
+      maybe: maybeP.map((p) => label(p, d.id)),
+      score: yesP.length + maybeP.length * 0.5,
+    };
   });
   const top = Math.max(...rows.map((r) => r.score));
   const n = people.length;
   $("results").innerHTML = rows.map((r) => {
     const best = top > 0 && r.score === top;
-    const names = [...r.yes.map((x) => `<span class="ny">${esc(x)}</span>`), ...r.maybe.map((x) => `${esc(x)}?`)].join(", ");
+    const names = [...r.yes.map((x) => `<span class="ny">${x}</span>`), ...r.maybe.map((x) => `${x} (maybe)`)].join(", ");
     return `<div class="row${best ? " best" : ""}">
       <div class="top"><span class="when">${best ? "👑 " : ""}${r.d.dow} ${r.d.date}${r.d.tag ? " · " + r.d.tag : ""}</span>
       <span class="count"><b>${r.yes.length}</b> yes${r.maybe.length ? ` · ${r.maybe.length} maybe` : ""}</span></div>
       <div class="bar"><div class="y" style="width:${(r.yes.length / n) * 100}%"></div><div class="m" style="width:${(r.maybe.length / n) * 100}%"></div></div>
-      <div class="names">${names || "nobody yet"}</div></div>`;
+      <div class="names">${names || "nobody yet"}</div>
+      ${r.allBy && r.yes.length > 1 ? `<div class="allby">everyone who said yes is free from ${r.allBy}</div>` : ""}</div>`;
   }).join("");
   $("who").textContent = `${n} ${n === 1 ? "person has" : "people have"} voted: ${people.map((p) => p.name).join(", ")}`;
 }
@@ -236,9 +269,10 @@ $("save").onclick = async () => {
   $("save").disabled = true;
   try {
     const key = keyFor(name) || "anon";
-    await api.save(key, { name, picks, at: Date.now() });
+    await api.save(key, { name, picks, times, at: Date.now() });
     store.set("my-name", name);
     store.set("my-picks", JSON.stringify(picks));
+    store.set("my-times", JSON.stringify(times));
     msg.textContent = "Saved! You can come back and change it anytime.";
     msg.classList.add("ok");
     confetti();
@@ -275,6 +309,7 @@ function confetti() {
 // Bring back this person's previous answers so they can edit them.
 $("name").value = store.get("my-name") || "";
 try { picks = JSON.parse(store.get("my-picks") || "{}") || {}; } catch { picks = {}; }
+try { times = JSON.parse(store.get("my-times") || "{}") || {}; } catch { times = {}; }
 $("demo").hidden = !!DB_URL;
 renderDays();
 refresh();
