@@ -126,14 +126,20 @@
 // Firebase Realtime Database URL, e.g. "https://party-poll-1234-default-rtdb.europe-west1.firebasedatabase.app"
 const DB_URL = "https://party-poll-d5b90-default-rtdb.europe-west1.firebasedatabase.app";
 const POLL_ID = "bday-2026";
-const DAYS = [
-  { id: "2026-10-29", dow: "Thu", date: "Oct 29", tag: "" },
-  { id: "2026-10-30", dow: "Fri", date: "Oct 30", tag: "🎂 the day" },
-  { id: "2026-10-31", dow: "Sat", date: "Oct 31", tag: "🎃 Halloween" },
-  { id: "2026-11-01", dow: "Sun", date: "Nov 1",  tag: "" },
-  { id: "2026-11-06", dow: "Fri", date: "Nov 6",  tag: "" },
-  { id: "2026-11-07", dow: "Sat", date: "Nov 7",  tag: "" },
-];
+const FIRST_DAY = "2026-10-28";
+const NUM_DAYS = 14;
+const TAGS = { "2026-10-30": "🎂 the day", "2026-10-31": "🎃 Halloween" };
+const DAYS = Array.from({ length: NUM_DAYS }, (_, i) => {
+  const d = new Date(FIRST_DAY + "T12:00:00");
+  d.setDate(d.getDate() + i);
+  const id = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return {
+    id,
+    dow: d.toLocaleDateString("en-US", { weekday: "short" }),
+    date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    tag: TAGS[id] || "",
+  };
+});
 // -------------------------------
 
 const $ = (id) => document.getElementById(id);
